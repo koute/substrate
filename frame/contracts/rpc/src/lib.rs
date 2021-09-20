@@ -79,6 +79,7 @@ pub struct CallRequest<AccountId> {
 	dest: AccountId,
 	value: NumberOrHex,
 	gas_limit: NumberOrHex,
+	storage_limit: NumberOrHex,
 	input_data: Bytes,
 }
 
@@ -90,6 +91,7 @@ pub struct InstantiateRequest<AccountId, Hash> {
 	origin: AccountId,
 	endowment: NumberOrHex,
 	gas_limit: NumberOrHex,
+	storage_limit: NumberOrHex,
 	code: Code<Hash>,
 	data: Bytes,
 	salt: Bytes,
@@ -109,7 +111,7 @@ pub trait ContractsApi<BlockHash, BlockNumber, AccountId, Balance, Hash> {
 		&self,
 		call_request: CallRequest<AccountId>,
 		at: Option<BlockHash>,
-	) -> Result<ContractExecResult>;
+	) -> Result<ContractExecResult<Balance>>;
 
 	/// Instantiate a new contract.
 	///
@@ -122,7 +124,7 @@ pub trait ContractsApi<BlockHash, BlockNumber, AccountId, Balance, Hash> {
 		&self,
 		instantiate_request: InstantiateRequest<AccountId, Hash>,
 		at: Option<BlockHash>,
-	) -> Result<ContractInstantiateResult<AccountId>>;
+	) -> Result<ContractInstantiateResult<AccountId, Balance>>;
 
 	/// Returns the value under a specified storage `key` in a contract given by `address` param,
 	/// or `None` if it is not set.
@@ -173,20 +175,22 @@ where
 		&self,
 		call_request: CallRequest<AccountId>,
 		at: Option<<Block as BlockT>::Hash>,
-	) -> Result<ContractExecResult> {
+	) -> Result<ContractExecResult<Balance>> {
 		let api = self.client.runtime_api();
 		let at = BlockId::hash(at.unwrap_or_else(||
 			// If the block hash is not supplied assume the best block.
 			self.client.info().best_hash));
 
-		let CallRequest { origin, dest, value, gas_limit, input_data } = call_request;
+		let CallRequest { origin, dest, value, gas_limit, storage_limit, input_data } =
+			call_request;
 
 		let value: Balance = decode_hex(value, "balance")?;
 		let gas_limit: Weight = decode_hex(gas_limit, "weight")?;
+		let storage_limit: Balance = decode_hex(storage_limit, "balance")?;
 		limit_gas(gas_limit)?;
 
 		let exec_result = api
-			.call(&at, origin, dest, value, gas_limit, input_data.to_vec())
+			.call(&at, origin, dest, value, gas_limit, storage_limit, input_data.to_vec())
 			.map_err(runtime_error_into_rpc_err)?;
 
 		Ok(exec_result)
@@ -196,21 +200,31 @@ where
 		&self,
 		instantiate_request: InstantiateRequest<AccountId, Hash>,
 		at: Option<<Block as BlockT>::Hash>,
-	) -> Result<ContractInstantiateResult<AccountId>> {
+	) -> Result<ContractInstantiateResult<AccountId, Balance>> {
 		let api = self.client.runtime_api();
 		let at = BlockId::hash(at.unwrap_or_else(||
 			// If the block hash is not supplied assume the best block.
 			self.client.info().best_hash));
 
-		let InstantiateRequest { origin, endowment, gas_limit, code, data, salt } =
+		let InstantiateRequest { origin, endowment, gas_limit, storage_limit, code, data, salt } =
 			instantiate_request;
 
 		let endowment: Balance = decode_hex(endowment, "balance")?;
 		let gas_limit: Weight = decode_hex(gas_limit, "weight")?;
+		let storage_limit: Balance = decode_hex(storage_limit, "balance")?;
 		limit_gas(gas_limit)?;
 
 		let exec_result = api
-			.instantiate(&at, origin, endowment, gas_limit, code, data.to_vec(), salt.to_vec())
+			.instantiate(
+				&at,
+				origin,
+				endowment,
+				gas_limit,
+				storage_limit,
+				code,
+				data.to_vec(),
+				salt.to_vec(),
+			)
 			.map_err(runtime_error_into_rpc_err)?;
 
 		Ok(exec_result)
@@ -288,6 +302,7 @@ mod tests {
 			"dest": "5DRakbLVnjVrW6niwLfHGW24EeCEvDAFGEXrtaYS5M4ynoom",
 			"value": "0x112210f4B16c1cb1",
 			"gasLimit": 1000000000000,
+			"storageLimit": 5000,
 			"inputData": "0x8c97db39"
 		}
 		"#,
@@ -306,6 +321,7 @@ mod tests {
 			"origin": "5CiPPseXPECbkjWCa6MnjNokrgYjMqmKndv2rSnekmSK2DjL",
 			"endowment": "0x88",
 			"gasLimit": 42,
+			"storageLimit": "0x8474639",
 			"code": { "existing": "0x1122" },
 			"data": "0x4299",
 			"salt": "0x9988"
@@ -329,7 +345,7 @@ mod tests {
 	#[test]
 	fn call_result_should_serialize_deserialize_properly() {
 		fn test(expected: &str) {
-			let res: ContractExecResult = serde_json::from_str(expected).unwrap();
+			let res: ContractExecResult<u32> = serde_json::from_str(expected).unwrap();
 			let actual = serde_json::to_string(&res).unwrap();
 			assert_eq!(actual, trim(expected).as_str());
 		}
@@ -337,6 +353,7 @@ mod tests {
 			r#"{
 			"gasConsumed": 5000,
 			"gasRequired": 8000,
+			"storageDeposit": {"charge": 42000},
 			"debugMessage": "HelloWorld",
 			"result": {
 			  "Ok": {
@@ -350,6 +367,7 @@ mod tests {
 			r#"{
 			"gasConsumed": 3400,
 			"gasRequired": 5200,
+			"storageDeposit": {"refund": 12000},
 			"debugMessage": "HelloWorld",
 			"result": {
 			  "Err": "BadOrigin"
@@ -361,7 +379,8 @@ mod tests {
 	#[test]
 	fn instantiate_result_should_serialize_deserialize_properly() {
 		fn test(expected: &str) {
-			let res: ContractInstantiateResult<String> = serde_json::from_str(expected).unwrap();
+			let res: ContractInstantiateResult<String, u32> =
+				serde_json::from_str(expected).unwrap();
 			let actual = serde_json::to_string(&res).unwrap();
 			assert_eq!(actual, trim(expected).as_str());
 		}
@@ -369,6 +388,7 @@ mod tests {
 			r#"{
 			"gasConsumed": 5000,
 			"gasRequired": 8000,
+			"storageDeposit": {"refund": 12000},
 			"debugMessage": "HelloWorld",
 			"result": {
 			   "Ok": {
@@ -385,6 +405,7 @@ mod tests {
 			r#"{
 			"gasConsumed": 3400,
 			"gasRequired": 5200,
+			"storageDeposit": {"charge": 0},
 			"debugMessage": "HelloWorld",
 			"result": {
 			  "Err": "BadOrigin"
