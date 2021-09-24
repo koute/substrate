@@ -543,11 +543,6 @@ check-dependent-polkadot:
   variables:
     DEPENDENT_REPO: polkadot
 
-check-dependent-beefy:
-  <<: *check-dependent-project
-  variables:
-    DEPENDENT_REPO: grandpa-bridge-gadget
-
 check-dependent-cumulus:
   <<: *check-dependent-project
   variables:
