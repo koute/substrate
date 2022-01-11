@@ -183,9 +183,16 @@ impl InstanceWrapper {
 		engine: &Engine,
 		instance_pre: &InstancePre<StoreData>,
 		max_memory_size: Option<usize>,
+		reusable: bool,
 	) -> Result<Self> {
 		let mut store = create_store(engine, max_memory_size);
-		let instance = instance_pre.instantiate(&mut store).map_err(|error| {
+		let instance = if reusable {
+			instance_pre.instantiate_reusable(&mut store)
+		} else {
+			instance_pre.instantiate(&mut store)
+		};
+
+		let instance = instance.map_err(|error| {
 			WasmError::Other(
 				format!("failed to instantiate a new WASM module instance: {}", error,),
 			)
@@ -198,6 +205,12 @@ impl InstanceWrapper {
 		store.data_mut().table = table;
 
 		Ok(InstanceWrapper { instance, memory, store })
+	}
+
+	pub(crate) fn reset(&mut self) -> Result<()> {
+		self.instance.reset(&mut self.store).map_err(|error| {
+			WasmError::Other(format!("failed to reset the WASM instance: {}", error)).into()
+		})
 	}
 
 	/// Resolves a substrate entrypoint by the given name.

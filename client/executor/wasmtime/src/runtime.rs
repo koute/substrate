@@ -80,11 +80,15 @@ impl StoreData {
 pub(crate) type Store = wasmtime::Store<StoreData>;
 
 enum Strategy {
-	FastInstanceReuse {
+	LegacyInstanceReuse {
 		instance_wrapper: InstanceWrapper,
 		globals_snapshot: GlobalsSnapshot<wasmtime::Global>,
 		data_segments_snapshot: Arc<DataSegmentsSnapshot>,
 		heap_base: u32,
+	},
+	NativeInstanceReuse {
+		instance_creator: InstanceCreator,
+		instances: Vec<InstanceWrapper>,
 	},
 	RecreateInstance(InstanceCreator),
 }
@@ -96,8 +100,8 @@ struct InstanceCreator {
 }
 
 impl InstanceCreator {
-	fn instantiate(&mut self) -> Result<InstanceWrapper> {
-		InstanceWrapper::new(&self.engine, &self.instance_pre, self.max_memory_size)
+	fn instantiate(&mut self, reusable: bool) -> Result<InstanceWrapper> {
+		InstanceWrapper::new(&self.engine, &self.instance_pre, self.max_memory_size, reusable)
 	}
 }
 
@@ -136,41 +140,53 @@ struct InstanceSnapshotData {
 pub struct WasmtimeRuntime {
 	engine: wasmtime::Engine,
 	instance_pre: Arc<wasmtime::InstancePre<StoreData>>,
-	snapshot_data: Option<InstanceSnapshotData>,
+	instantiation_strategy: InstantiationStrategyWithData,
 	config: Config,
 }
 
 impl WasmModule for WasmtimeRuntime {
 	fn new_instance(&self) -> Result<Box<dyn WasmInstance>> {
-		let strategy = if let Some(ref snapshot_data) = self.snapshot_data {
-			let mut instance_wrapper = InstanceWrapper::new(
-				&self.engine,
-				&self.instance_pre,
-				self.config.max_memory_size,
-			)?;
-			let heap_base = instance_wrapper.extract_heap_base()?;
+		let strategy = match self.instantiation_strategy {
+			InstantiationStrategyWithData::LegacyInstanceReuse(ref snapshot_data) => {
+				let mut instance_wrapper = InstanceWrapper::new(
+					&self.engine,
+					&self.instance_pre,
+					self.config.max_memory_size,
+					false,
+				)?;
+				let heap_base = instance_wrapper.extract_heap_base()?;
 
-			// This function panics if the instance was created from a runtime blob different from
-			// which the mutable globals were collected. Here, it is easy to see that there is only
-			// a single runtime blob and thus it's the same that was used for both creating the
-			// instance and collecting the mutable globals.
-			let globals_snapshot = GlobalsSnapshot::take(
-				&snapshot_data.mutable_globals,
-				&mut InstanceGlobals { instance: &mut instance_wrapper },
-			);
+				// This function panics if the instance was created from a runtime blob different
+				// from which the mutable globals were collected. Here, it is easy to see that there
+				// is only a single runtime blob and thus it's the same that was used for both
+				// creating the instance and collecting the mutable globals.
+				let globals_snapshot = GlobalsSnapshot::take(
+					&snapshot_data.mutable_globals,
+					&mut InstanceGlobals { instance: &mut instance_wrapper },
+				);
 
-			Strategy::FastInstanceReuse {
-				instance_wrapper,
-				globals_snapshot,
-				data_segments_snapshot: snapshot_data.data_segments_snapshot.clone(),
-				heap_base,
-			}
-		} else {
-			Strategy::RecreateInstance(InstanceCreator {
-				engine: self.engine.clone(),
-				instance_pre: self.instance_pre.clone(),
-				max_memory_size: self.config.max_memory_size,
-			})
+				Strategy::LegacyInstanceReuse {
+					instance_wrapper,
+					globals_snapshot,
+					data_segments_snapshot: snapshot_data.data_segments_snapshot.clone(),
+					heap_base,
+				}
+			},
+
+			InstantiationStrategyWithData::RecreateInstance =>
+				Strategy::RecreateInstance(InstanceCreator {
+					engine: self.engine.clone(),
+					instance_pre: self.instance_pre.clone(),
+					max_memory_size: self.config.max_memory_size,
+				}),
+			InstantiationStrategyWithData::NativeInstanceReuse => {
+				let instance_creator = InstanceCreator {
+					engine: self.engine.clone(),
+					instance_pre: self.instance_pre.clone(),
+					max_memory_size: self.config.max_memory_size,
+				};
+				Strategy::NativeInstanceReuse { instance_creator, instances: Default::default() }
+			},
 		};
 
 		Ok(Box::new(WasmtimeInstance { strategy }))
@@ -186,7 +202,7 @@ pub struct WasmtimeInstance {
 impl WasmInstance for WasmtimeInstance {
 	fn call(&mut self, method: InvokeMethod, data: &[u8]) -> Result<Vec<u8>> {
 		match &mut self.strategy {
-			Strategy::FastInstanceReuse {
+			Strategy::LegacyInstanceReuse {
 				ref mut instance_wrapper,
 				globals_snapshot,
 				data_segments_snapshot,
@@ -212,8 +228,25 @@ impl WasmInstance for WasmtimeInstance {
 
 				result
 			},
+			Strategy::NativeInstanceReuse { ref mut instance_creator, ref mut instances } => {
+				let instance_wrapper = instances.pop();
+				let mut instance_wrapper = match instance_wrapper {
+					Some(instance_wrapper) => instance_wrapper,
+					None => instance_creator.instantiate(true)?,
+				};
+
+				let heap_base = instance_wrapper.extract_heap_base()?;
+				let entrypoint = instance_wrapper.resolve_entrypoint(method)?;
+				let allocator = FreeingBumpHeapAllocator::new(heap_base);
+				let result = perform_call(data, &mut instance_wrapper, entrypoint, allocator);
+				match instance_wrapper.reset() {
+					Ok(()) => instances.push(instance_wrapper),
+					Err(error) => log::warn!("{}", error),
+				}
+				result
+			},
 			Strategy::RecreateInstance(ref mut instance_creator) => {
-				let mut instance_wrapper = instance_creator.instantiate()?;
+				let mut instance_wrapper = instance_creator.instantiate(false)?;
 				let heap_base = instance_wrapper.extract_heap_base()?;
 				let entrypoint = instance_wrapper.resolve_entrypoint(method)?;
 
@@ -225,10 +258,12 @@ impl WasmInstance for WasmtimeInstance {
 
 	fn get_global_const(&mut self, name: &str) -> Result<Option<Value>> {
 		match &mut self.strategy {
-			Strategy::FastInstanceReuse { instance_wrapper, .. } =>
+			Strategy::LegacyInstanceReuse { instance_wrapper, .. } =>
 				instance_wrapper.get_global_val(name),
+			Strategy::NativeInstanceReuse { ref mut instance_creator, .. } =>
+				instance_creator.instantiate(false)?.get_global_val(name),
 			Strategy::RecreateInstance(ref mut instance_creator) =>
-				instance_creator.instantiate()?.get_global_val(name),
+				instance_creator.instantiate(false)?.get_global_val(name),
 		}
 	}
 
@@ -239,7 +274,8 @@ impl WasmInstance for WasmtimeInstance {
 				// associated with it.
 				None
 			},
-			Strategy::FastInstanceReuse { instance_wrapper, .. } =>
+			Strategy::NativeInstanceReuse { .. } => None,
+			Strategy::LegacyInstanceReuse { instance_wrapper, .. } =>
 				Some(instance_wrapper.base_ptr()),
 		}
 	}
@@ -397,18 +433,22 @@ pub struct DeterministicStackLimit {
 	pub native_stack_max: u32,
 }
 
+#[non_exhaustive]
+#[derive(Copy, Clone, Debug)]
+pub enum InstantiationStrategy {
+	NativeInstanceReuse,
+	LegacyInstanceReuse,
+	RecreateInstance,
+}
+
+enum InstantiationStrategyWithData {
+	NativeInstanceReuse,
+	LegacyInstanceReuse(InstanceSnapshotData),
+	RecreateInstance,
+}
+
 pub struct Semantics {
-	/// Enabling this will lead to some optimization shenanigans that make calling [`WasmInstance`]
-	/// extremely fast.
-	///
-	/// Primarily this is achieved by not recreating the instance for each call and performing a
-	/// bare minimum clean up: reapplying the data segments and restoring the values for global
-	/// variables.
-	///
-	/// Since this feature depends on instrumentation, it can be set only if runtime is
-	/// instantiated using the runtime blob, e.g. using [`create_runtime`].
-	// I.e. if [`CodeSupplyMode::Verbatim`] is used.
-	pub fast_instance_reuse: bool,
+	pub instantiation_strategy: InstantiationStrategy,
 
 	/// Specifiying `Some` will enable deterministic stack height. That is, all executor
 	/// invocations will reach stack overflow at the exactly same point across different wasmtime
@@ -563,7 +603,7 @@ where
 	let engine = Engine::new(&wasmtime_config)
 		.map_err(|e| WasmError::Other(format!("cannot create the wasmtime engine: {}", e)))?;
 
-	let (module, snapshot_data) = match code_supply_mode {
+	let (module, instantiation_strategy) = match code_supply_mode {
 		CodeSupplyMode::Verbatim { blob } => {
 			let mut blob = instrument(blob, &config.semantics)?;
 
@@ -585,16 +625,27 @@ where
 			let module = wasmtime::Module::new(&engine, &serialized_blob)
 				.map_err(|e| WasmError::Other(format!("cannot create module: {}", e)))?;
 
-			if config.semantics.fast_instance_reuse {
-				let data_segments_snapshot = DataSegmentsSnapshot::take(&blob).map_err(|e| {
-					WasmError::Other(format!("cannot take data segments snapshot: {}", e))
-				})?;
-				let data_segments_snapshot = Arc::new(data_segments_snapshot);
-				let mutable_globals = ExposedMutableGlobalsSet::collect(&blob);
+			match config.semantics.instantiation_strategy {
+				InstantiationStrategy::LegacyInstanceReuse => {
+					let data_segments_snapshot =
+						DataSegmentsSnapshot::take(&blob).map_err(|e| {
+							WasmError::Other(format!("cannot take data segments snapshot: {}", e))
+						})?;
+					let data_segments_snapshot = Arc::new(data_segments_snapshot);
+					let mutable_globals = ExposedMutableGlobalsSet::collect(&blob);
 
-				(module, Some(InstanceSnapshotData { data_segments_snapshot, mutable_globals }))
-			} else {
-				(module, None)
+					(
+						module,
+						InstantiationStrategyWithData::LegacyInstanceReuse(InstanceSnapshotData {
+							data_segments_snapshot,
+							mutable_globals,
+						}),
+					)
+				},
+				InstantiationStrategy::NativeInstanceReuse =>
+					(module, InstantiationStrategyWithData::NativeInstanceReuse),
+				InstantiationStrategy::RecreateInstance =>
+					(module, InstantiationStrategyWithData::RecreateInstance),
 			}
 		},
 		CodeSupplyMode::Artifact { compiled_artifact } => {
@@ -603,7 +654,7 @@ where
 			let module = wasmtime::Module::deserialize(&engine, compiled_artifact)
 				.map_err(|e| WasmError::Other(format!("cannot deserialize module: {}", e)))?;
 
-			(module, None)
+			(module, InstantiationStrategyWithData::RecreateInstance)
 		},
 	};
 
@@ -615,7 +666,12 @@ where
 		.instantiate_pre(&mut store, &module)
 		.map_err(|e| WasmError::Other(format!("cannot preinstantiate module: {}", e)))?;
 
-	Ok(WasmtimeRuntime { engine, instance_pre: Arc::new(instance_pre), snapshot_data, config })
+	Ok(WasmtimeRuntime {
+		engine,
+		instance_pre: Arc::new(instance_pre),
+		instantiation_strategy,
+		config,
+	})
 }
 
 fn instrument(
@@ -627,7 +683,7 @@ fn instrument(
 	}
 
 	// If enabled, this should happen after all other passes that may introduce global variables.
-	if semantics.fast_instance_reuse {
+	if let InstantiationStrategy::LegacyInstanceReuse = semantics.instantiation_strategy {
 		blob.expose_mutable_globals();
 	}
 

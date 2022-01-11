@@ -322,7 +322,7 @@ where
 				allow_missing_func_imports,
 				cache_path: cache_path.map(ToOwned::to_owned),
 				semantics: sc_executor_wasmtime::Semantics {
-					fast_instance_reuse: true,
+					instantiation_strategy: sc_executor_wasmtime::InstantiationStrategy::NativeInstanceReuse,
 					deterministic_stack_limit: None,
 					canonicalize_nans: false,
 					parallel_compilation: true,

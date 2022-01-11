@@ -19,15 +19,15 @@ use criterion::{criterion_group, criterion_main, Criterion};
 
 use sc_executor_common::{runtime_blob::RuntimeBlob, wasm_runtime::WasmModule};
 use sc_runtime_test::wasm_binary_unwrap as test_runtime;
+use sc_executor_wasmtime::InstantiationStrategy;
+use sc_runtime_test::wasm_binary_unwrap;
 use sp_wasm_interface::HostFunctions as _;
 use std::sync::Arc;
 
+#[derive(Clone)]
 enum Method {
 	Interpreted,
-	#[cfg(feature = "wasmtime")]
-	Compiled {
-		fast_instance_reuse: bool,
-	},
+	Compiled { instantiation_strategy: InstantiationStrategy },
 }
 
 // This is just a bog-standard Kusama runtime with the extra `test_empty_return`
@@ -51,7 +51,7 @@ fn initialize(runtime: &[u8], method: Method) -> Arc<dyn WasmModule> {
 		)
 		.map(|runtime| -> Arc<dyn WasmModule> { Arc::new(runtime) }),
 		#[cfg(feature = "wasmtime")]
-		Method::Compiled { fast_instance_reuse } =>
+		Method::Compiled { instantiation_strategy } =>
 			sc_executor_wasmtime::create_runtime::<sp_io::SubstrateHostFunctions>(
 				blob,
 				sc_executor_wasmtime::Config {
@@ -60,7 +60,7 @@ fn initialize(runtime: &[u8], method: Method) -> Arc<dyn WasmModule> {
 					allow_missing_func_imports,
 					cache_path: None,
 					semantics: sc_executor_wasmtime::Semantics {
-						fast_instance_reuse,
+						instantiation_strategy,
 						deterministic_stack_limit: None,
 						canonicalize_nans: false,
 						parallel_compilation: true,
@@ -75,57 +75,30 @@ fn initialize(runtime: &[u8], method: Method) -> Arc<dyn WasmModule> {
 fn bench_call_instance(c: &mut Criterion) {
 	let _ = env_logger::try_init();
 
-	#[cfg(feature = "wasmtime")]
-	{
-		let runtime = initialize(test_runtime(), Method::Compiled { fast_instance_reuse: true });
-		c.bench_function("call_instance_test_runtime_with_fast_instance_reuse", |b| {
-			let mut instance = runtime.new_instance().unwrap();
-			b.iter(|| instance.call_export("test_empty_return", &[0]).unwrap())
-		});
-	}
+    let strategies = [
+        ("legacy_instance_reuse", Method::Compiled { instantiation_strategy: InstantiationStrategy::LegacyInstanceReuse }),
+        ("native_instance_reuse", Method::Compiled { instantiation_strategy: InstantiationStrategy::NativeInstanceReuse }),
+        ("recreate_instance", Method::Compiled { instantiation_strategy: InstantiationStrategy::RecreateInstance }),
+        ("interpreted", Method::Interpreted),
+    ];
 
-	#[cfg(feature = "wasmtime")]
-	{
-		let runtime = initialize(test_runtime(), Method::Compiled { fast_instance_reuse: false });
-		c.bench_function("call_instance_test_runtime_without_fast_instance_reuse", |b| {
-			let mut instance = runtime.new_instance().unwrap();
-			b.iter(|| instance.call_export("test_empty_return", &[0]).unwrap());
-		});
-	}
+    let runtimes = [
+        ("test_runtime", test_runtime()),
+        ("kusama_runtime", kusama_runtime())
+    ];
 
-	#[cfg(feature = "wasmtime")]
-	{
-		let runtime = initialize(kusama_runtime(), Method::Compiled { fast_instance_reuse: true });
-		c.bench_function("call_instance_kusama_runtime_with_fast_instance_reuse", |b| {
-			let mut instance = runtime.new_instance().unwrap();
-			b.iter(|| instance.call_export("test_empty_return", &[0]).unwrap())
-		});
-	}
+    for (strategy_name, strategy) in strategies {
+        for (runtime_name, runtime) in runtimes {
+            let runtime = initialize(runtime, strategy.clone());
+            let benchmark_name = format!("call_instance_{}_with_{}", runtime_name, strategy_name);
+            c.bench_function(&benchmark_name, |b| {
+                let mut instance = runtime.new_instance().unwrap();
+                b.iter(|| instance.call_export("test_empty_return", &[0]).unwrap())
+            });
+        }
+    }
 
-	#[cfg(feature = "wasmtime")]
-	{
-		let runtime = initialize(kusama_runtime(), Method::Compiled { fast_instance_reuse: false });
-		c.bench_function("call_instance_kusama_runtime_without_fast_instance_reuse", |b| {
-			let mut instance = runtime.new_instance().unwrap();
-			b.iter(|| instance.call_export("test_empty_return", &[0]).unwrap());
-		});
-	}
-
-	{
-		let runtime = initialize(test_runtime(), Method::Interpreted);
-		c.bench_function("call_instance_test_runtime_interpreted", |b| {
-			let mut instance = runtime.new_instance().unwrap();
-			b.iter(|| instance.call_export("test_empty_return", &[0]).unwrap())
-		});
-	}
-
-	{
-		let runtime = initialize(kusama_runtime(), Method::Interpreted);
-		c.bench_function("call_instance_kusama_runtime_interpreted", |b| {
-			let mut instance = runtime.new_instance().unwrap();
-			b.iter(|| instance.call_export("test_empty_return", &[0]).unwrap())
-		});
-	}
+//	#[cfg(feature = "wasmtime")]
 }
 
 criterion_group! {
