@@ -329,6 +329,30 @@ fn common_config(semantics: &Semantics) -> std::result::Result<wasmtime::Config,
 	Ok(config)
 }
 
+fn setup_pooling(config: &wasmtime::Config) -> wasmtime::Config {
+	let mut config = config.clone();
+
+	config.allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling {
+		strategy: wasmtime::PoolingAllocationStrategy::NextAvailable,
+		module_limits: wasmtime::ModuleLimits {
+			imported_functions: 1000,
+			imported_tables: 1,
+			imported_memories: 1,
+			imported_globals: 100,
+			types: 1000,
+			functions: 5000,
+			tables: 1,
+			memories: 1,
+			globals: 100,
+			table_elements: 1000,
+			memory_pages: 4096,
+		},
+		instance_limits: wasmtime::InstanceLimits { count: 4 },
+	});
+
+	config
+}
+
 /// Knobs for deterministic stack height limiting.
 ///
 /// The WebAssembly standard defines a call/value stack but it doesn't say anything about its
@@ -520,6 +544,13 @@ where
 {
 	// Create the engine, store and finally the module from the given code.
 	let mut wasmtime_config = common_config(&config.semantics)?;
+	if std::env::var_os("FORCE_WASMTIME_INSTANCE_POOLING")
+		.map(|value| value == "1")
+		.unwrap_or(false)
+	{
+		log::info!("Will use wasmtime instance pooling!");
+		wasmtime_config = setup_pooling(&wasmtime_config);
+	}
 	if let Some(ref cache_path) = config.cache_path {
 		if let Err(reason) = setup_wasmtime_caching(cache_path, &mut wasmtime_config) {
 			log::warn!(
