@@ -380,10 +380,10 @@ fn setup_pooling(config: &wasmtime::Config) -> wasmtime::Config {
 			tables: 1,
 			memories: 1,
 			globals: 100,
-			table_elements: 1000,
+			table_elements: 2000,
 			memory_pages: 4096,
 		},
-		instance_limits: wasmtime::InstanceLimits { count: 4 },
+		instance_limits: wasmtime::InstanceLimits { count: 20 },
 	});
 
 	config
