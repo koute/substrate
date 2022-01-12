@@ -180,12 +180,13 @@ impl WasmModule for WasmtimeRuntime {
 					max_memory_size: self.config.max_memory_size,
 				}),
 			InstantiationStrategyWithData::NativeInstanceReuse => {
-				let instance_creator = InstanceCreator {
+				let mut instance_creator = InstanceCreator {
 					engine: self.engine.clone(),
 					instance_pre: self.instance_pre.clone(),
 					max_memory_size: self.config.max_memory_size,
 				};
-				Strategy::NativeInstanceReuse { instance_creator, instances: Default::default() }
+				let instance = instance_creator.instantiate(true)?;
+				Strategy::NativeInstanceReuse { instance_creator, instances: vec![instance] }
 			},
 		};
 
