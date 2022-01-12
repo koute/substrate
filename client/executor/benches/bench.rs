@@ -17,12 +17,17 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
+use codec::Encode;
+
 use sc_executor_common::{runtime_blob::RuntimeBlob, wasm_runtime::WasmModule};
-use sc_runtime_test::wasm_binary_unwrap as test_runtime;
+use sc_executor_common::wasm_runtime::WasmInstance;
 use sc_executor_wasmtime::InstantiationStrategy;
 use sc_runtime_test::wasm_binary_unwrap;
 use sp_wasm_interface::HostFunctions as _;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
 #[derive(Clone)]
 enum Method {
@@ -30,8 +35,9 @@ enum Method {
 	Compiled { instantiation_strategy: InstantiationStrategy },
 }
 
-// This is just a bog-standard Kusama runtime with the extra `test_empty_return`
-// function copy-pasted from the test runtime.
+// This is just a bog-standard Kusama runtime with an extra
+// `test_empty_return` and `test_dirty_plenty_memory` functions
+// copy-pasted from the test runtime.
 fn kusama_runtime() -> &'static [u8] {
 	include_bytes!("kusama_runtime.wasm")
 }
@@ -76,8 +82,11 @@ fn bench_call_instance(c: &mut Criterion) {
 	let _ = env_logger::try_init();
 
     let strategies = [
+        #[cfg(feature = "wasmtime")]
         ("legacy_instance_reuse", Method::Compiled { instantiation_strategy: InstantiationStrategy::LegacyInstanceReuse }),
+        #[cfg(feature = "wasmtime")]
         ("native_instance_reuse", Method::Compiled { instantiation_strategy: InstantiationStrategy::NativeInstanceReuse }),
+        #[cfg(feature = "wasmtime")]
         ("recreate_instance", Method::Compiled { instantiation_strategy: InstantiationStrategy::RecreateInstance }),
         ("interpreted", Method::Interpreted),
     ];
@@ -87,18 +96,86 @@ fn bench_call_instance(c: &mut Criterion) {
         ("kusama_runtime", kusama_runtime())
     ];
 
+    let thread_counts = [
+        1,
+        2,
+        4,
+        8,
+        16
+    ];
+
+
+    fn test_call_empty_function(instance: &mut Box<dyn WasmInstance>) {
+        instance.call_export("test_empty_return", &[0]).unwrap();
+    }
+
+    fn test_dirty_1mb_of_memory(instance: &mut Box<dyn WasmInstance>) {
+        instance.call_export("test_dirty_plenty_memory", &(0, 16).encode()).unwrap();
+    }
+
+    let testcases = [
+        ("call_empty_function", test_call_empty_function as fn(&mut Box<dyn WasmInstance>)),
+        ("dirty_1mb_of_memory", test_dirty_1mb_of_memory)
+    ];
+
+    let num_cpus = num_cpus::get_physical();
+
     for (strategy_name, strategy) in strategies {
         for (runtime_name, runtime) in runtimes {
             let runtime = initialize(runtime, strategy.clone());
-            let benchmark_name = format!("call_instance_{}_with_{}", runtime_name, strategy_name);
-            c.bench_function(&benchmark_name, |b| {
-                let mut instance = runtime.new_instance().unwrap();
-                b.iter(|| instance.call_export("test_empty_return", &[0]).unwrap())
-            });
+
+            for (testcase_name, testcase) in testcases {
+                for thread_count in thread_counts {
+                    if thread_count > num_cpus {
+                        // If there are not enough cores available the benchmark is pointless.
+                        continue;
+                    }
+
+                    let benchmark_name = format!("{}_from_{}_with_{}_on_{}_threads", testcase_name, runtime_name, strategy_name, thread_count);
+                    c.bench_function(&benchmark_name, |b| {
+                        // Here we deliberately start a bunch of extra threads which will just
+                        // keep on independently instantiating the runtime over and over again.
+                        //
+                        // We don't really have to measure how much time those take since the
+                        // work done is essentially the same on each thread, and what we're
+                        // interested in here is only how those extra threads affect the execution
+                        // on the current thread.
+                        //
+                        // In an ideal case assuming we have enough CPU cores those extra threads
+                        // shouldn't affect the main thread's runtime at all, however in practice
+                        // they're not completely independent. There might be per-process
+                        // locks in the kernel which are briefly held during instantiation, etc.,
+                        // and how much those affect the execution here is what we want to measure.
+                        let is_benchmark_running = Arc::new(AtomicBool::new(true));
+                        let threads_running = Arc::new(AtomicUsize::new(0));
+                        let aux_threads: Vec<_> = (0..thread_count - 1).map(|_| {
+                            let mut instance = runtime.new_instance().unwrap();
+                            let is_benchmark_running = is_benchmark_running.clone();
+                            let threads_running = threads_running.clone();
+                            std::thread::spawn(move || {
+                                threads_running.fetch_add(1, Ordering::SeqCst);
+                                while is_benchmark_running.load(Ordering::Relaxed) {
+                                    testcase(&mut instance);
+                                }
+                            })
+                        }).collect();
+
+                        while threads_running.load(Ordering::SeqCst) != (thread_count - 1) {
+                            std::thread::yield_now();
+                        }
+
+                        let mut instance = runtime.new_instance().unwrap();
+                        b.iter(|| testcase(&mut instance));
+
+                        is_benchmark_running.store(false, Ordering::SeqCst);
+                        for thread in aux_threads {
+                            thread.join().unwrap();
+                        }
+                    });
+                }
+            }
         }
     }
-
-//	#[cfg(feature = "wasmtime")]
 }
 
 criterion_group! {
