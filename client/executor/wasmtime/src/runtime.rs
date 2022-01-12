@@ -275,7 +275,15 @@ impl WasmInstance for WasmtimeInstance {
 				// associated with it.
 				None
 			},
-			Strategy::NativeInstanceReuse { .. } => None,
+			Strategy::NativeInstanceReuse { instances, .. } =>
+				if instances.len() == 1 {
+					Some(instances[0].base_ptr())
+				} else {
+					if instances.len() > 1 {
+						log::warn!("WasmInstance::linear_memory_base_ptr called when there are multiple reused instanced");
+					}
+					None
+				},
 			Strategy::LegacyInstanceReuse { instance_wrapper, .. } =>
 				Some(instance_wrapper.base_ptr()),
 		}
