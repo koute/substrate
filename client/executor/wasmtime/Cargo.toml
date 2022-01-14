@@ -34,7 +34,9 @@ features = [
     "parallel-compilation",
     "pooling-allocator",
 ]
-path = "/scratch/cpp/wasmtime/crates/wasmtime"
+# path = "/scratch/cpp/wasmtime/crates/wasmtime"
+git = "https://github.com/koute/wasmtime.git"
+branch = "main_cow_instance_reuse"
 
 [dev-dependencies]
 sc-runtime-test = { version = "2.0.0", path = "../runtime-test" }
