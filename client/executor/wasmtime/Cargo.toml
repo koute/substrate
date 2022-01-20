@@ -36,7 +36,7 @@ features = [
 ]
 # path = "/scratch/cpp/wasmtime/crates/wasmtime"
 git = "https://github.com/koute/wasmtime.git"
-branch = "main_cow_instance_reuse"
+branch = "main_cow_instance_reuse_with_cfallin_memfd_cow"
 
 [dev-dependencies]
 sc-runtime-test = { version = "2.0.0", path = "../runtime-test" }
@@ -45,3 +45,4 @@ wat = "1.0"
 
 [features]
 uffd = ["wasmtime/uffd"]
+memfd-allocator = ["wasmtime/memfd-allocator"]
