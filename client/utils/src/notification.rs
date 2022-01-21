@@ -28,13 +28,22 @@
 
 use std::{marker::PhantomData, sync::Arc};
 
-use crate::mpsc::{tracing_unbounded, TracingUnboundedReceiver, TracingUnboundedSender};
+use crate::channel::*;
 
 use parking_lot::Mutex;
 
 /// Collection of channel sending endpoints shared with the receiver side
 /// so they can register themselves.
 type SharedSenders<Payload> = Arc<Mutex<Vec<TracingUnboundedSender<Payload>>>>;
+
+impl<Payload> SubscriptionRegistry for Mutex<Vec<TracingUnboundedSender<Payload>>>
+where
+	Payload: Send + Sync,
+{
+	fn unsubscribe(&self, key: u64, was_triggered: bool) {
+		todo!();
+	}
+}
 
 /// Trait used to define the "tracing key" string used to tag
 /// and identify the mpsc channels.
@@ -66,9 +75,6 @@ impl<Payload: Clone> NotificationSender<Payload> {
 	) -> Result<(), Error> {
 		let mut subscribers = self.subscribers.lock();
 
-		// do an initial prune on closed subscriptions
-		subscribers.retain(|n| !n.is_closed());
-
 		if !subscribers.is_empty() {
 			let payload = payload()?;
 			subscribers.retain(|n| n.unbounded_send(payload.clone()).is_ok());
@@ -88,7 +94,7 @@ pub struct NotificationStream<Payload: Clone, TK: TracingKeyStr> {
 	_trace_key: PhantomData<TK>,
 }
 
-impl<Payload: Clone, TK: TracingKeyStr> NotificationStream<Payload, TK> {
+impl<Payload: Clone + Send + Sync + 'static, TK: TracingKeyStr> NotificationStream<Payload, TK> {
 	/// Creates a new pair of receiver and sender of `Payload` notifications.
 	pub fn channel() -> (NotificationSender<Payload>, Self) {
 		let subscribers = Arc::new(Mutex::new(vec![]));
@@ -106,7 +112,9 @@ impl<Payload: Clone, TK: TracingKeyStr> NotificationStream<Payload, TK> {
 
 	/// Subscribe to a channel through which the generic payload can be received.
 	pub fn subscribe(&self) -> TracingUnboundedReceiver<Payload> {
-		let (sender, receiver) = tracing_unbounded(TK::TRACING_KEY);
+		let subscribers = self.subscribers.lock();
+		let id = subscribers.len() as u64;
+		let (sender, receiver) = tracing_unbounded(TK::TRACING_KEY, self.subscribers.clone(), id);
 		self.subscribers.lock().push(sender);
 		receiver
 	}

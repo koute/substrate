@@ -20,16 +20,15 @@
 
 use std::{
 	collections::{HashMap, HashSet},
-	pin::Pin,
-	sync::{Arc, Weak},
-	task::Poll,
+	sync::Arc,
 };
 
 use fnv::{FnvHashMap, FnvHashSet};
-use futures::Stream;
 use parking_lot::Mutex;
 use prometheus_endpoint::{register, CounterVec, Opts, Registry, U64};
-use sc_utils::mpsc::{tracing_unbounded, TracingUnboundedReceiver, TracingUnboundedSender};
+use sc_utils::channel::{
+	tracing_unbounded, SubscriptionRegistry, TracingUnboundedReceiver, TracingUnboundedSender,
+};
 use sp_core::{
 	hexdisplay::HexDisplay,
 	storage::{StorageData, StorageKey},
@@ -81,46 +80,7 @@ impl StorageChangeSet {
 }
 
 /// Type that implements `futures::Stream` of storage change events.
-pub struct StorageEventStream<H> {
-	rx: TracingUnboundedReceiver<(H, StorageChangeSet)>,
-	storage_notifications: Weak<Mutex<StorageNotificationsImpl<H>>>,
-	was_triggered: bool,
-	id: u64,
-}
-
-impl<H> Stream for StorageEventStream<H> {
-	type Item = <TracingUnboundedReceiver<(H, StorageChangeSet)> as Stream>::Item;
-	fn poll_next(
-		mut self: Pin<&mut Self>,
-		cx: &mut std::task::Context<'_>,
-	) -> Poll<Option<Self::Item>> {
-		let result = Stream::poll_next(Pin::new(&mut self.rx), cx);
-		if result.is_ready() {
-			self.was_triggered = true;
-		}
-		result
-	}
-}
-
-impl<H> Drop for StorageEventStream<H> {
-	fn drop(&mut self) {
-		if let Some(storage_notifications) = self.storage_notifications.upgrade() {
-			if let Some((keys, child_keys)) =
-				storage_notifications.lock().remove_subscriber(self.id)
-			{
-				if !self.was_triggered {
-					log::trace!(
-						target: "storage_notifications",
-						"Listener was never triggered: id={}, keys={:?}, child_keys={:?}",
-						self.id,
-						PrintKeys(&keys),
-						PrintChildKeys(&child_keys),
-					);
-				}
-			}
-		}
-	}
-}
+pub type StorageEventStream<H> = TracingUnboundedReceiver<(H, StorageChangeSet)>;
 
 type SubscriberId = u64;
 
@@ -128,7 +88,17 @@ type SubscribersGauge = CounterVec<U64>;
 
 /// Manages storage listeners.
 #[derive(Debug)]
-pub struct StorageNotifications<Block: BlockT>(Arc<Mutex<StorageNotificationsImpl<Block::Hash>>>);
+pub struct StorageNotifications<Block: BlockT>(Arc<ProtectedStorageNotificationsImpl<Block::Hash>>);
+
+#[derive(Debug, Default)]
+struct ProtectedStorageNotificationsImpl<Hash>(Mutex<StorageNotificationsImpl<Hash>>);
+
+impl<Hash> std::ops::Deref for ProtectedStorageNotificationsImpl<Hash> {
+	type Target = Mutex<StorageNotificationsImpl<Hash>>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
 
 type Keys = Option<HashSet<StorageKey>>;
 type ChildKeys = Option<HashMap<StorageKey, Option<HashSet<StorageKey>>>>;
@@ -168,6 +138,25 @@ impl<Hash> Default for StorageNotificationsImpl<Hash> {
 	}
 }
 
+impl<Hash> SubscriptionRegistry for ProtectedStorageNotificationsImpl<Hash>
+where
+	Hash: Send + Sync,
+{
+	fn unsubscribe(&self, id: u64, was_triggered: bool) {
+		if let Some((keys, child_keys)) = self.0.lock().remove_subscriber(id) {
+			if !was_triggered {
+				log::trace!(
+					target: "storage_notifications",
+					"Listener was never triggered: id={}, keys={:?}, child_keys={:?}",
+					id,
+					PrintKeys(&keys),
+					PrintChildKeys(&child_keys),
+				);
+			}
+		}
+	}
+}
+
 struct PrintKeys<'a>(&'a Keys);
 impl<'a> std::fmt::Debug for PrintKeys<'a> {
 	fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -196,8 +185,8 @@ impl<Block: BlockT> StorageNotifications<Block> {
 	/// Initialize a new StorageNotifications
 	/// optionally pass a prometheus registry to send subscriber metrics to
 	pub fn new(prometheus_registry: Option<Registry>) -> Self {
-		StorageNotifications(Arc::new(Mutex::new(StorageNotificationsImpl::new(
-			prometheus_registry,
+		StorageNotifications(Arc::new(ProtectedStorageNotificationsImpl(Mutex::new(
+			StorageNotificationsImpl::new(prometheus_registry),
 		))))
 	}
 
@@ -222,9 +211,7 @@ impl<Block: BlockT> StorageNotifications<Block> {
 		filter_keys: Option<&[StorageKey]>,
 		filter_child_keys: Option<&[(StorageKey, Option<Vec<StorageKey>>)]>,
 	) -> StorageEventStream<Block::Hash> {
-		let (id, rx) = self.0.lock().listen(filter_keys, filter_child_keys);
-		let storage_notifications = Arc::downgrade(&self.0);
-		StorageEventStream { rx, storage_notifications, was_triggered: false, id }
+		self.0.lock().listen(self.0.clone(), filter_keys, filter_child_keys)
 	}
 }
 
@@ -318,37 +305,21 @@ impl<Hash> StorageNotificationsImpl<Hash> {
 		let child_changes = Arc::new(child_changes);
 		// Trigger the events
 
-		let to_remove = self
-			.sinks
-			.iter()
-			.filter_map(|(subscriber, &(ref sink, ref filter, ref child_filters))| {
-				let should_remove = {
-					if subscribers.contains(subscriber) {
-						sink.unbounded_send((
-							hash.clone(),
-							StorageChangeSet {
-								changes: changes.clone(),
-								child_changes: child_changes.clone(),
-								filter: filter.clone(),
-								child_filters: child_filters.clone(),
-							},
-						))
-						.is_err()
-					} else {
-						sink.is_closed()
-					}
-				};
-
-				if should_remove {
-					Some(subscriber.clone())
-				} else {
-					None
-				}
-			})
-			.collect::<Vec<_>>();
-
-		for sub_id in to_remove {
-			self.remove_subscriber(sub_id);
+		for (subscriber, &(ref sink, ref filter, ref child_filters)) in &self.sinks {
+			if subscribers.contains(subscriber) {
+				// This can only return an error if the receiver was disconnected,
+				// in which case it will be automatically removed from the list
+				// anyway once we return from this functions.
+				let _ = sink.unbounded_send((
+					hash.clone(),
+					StorageChangeSet {
+						changes: changes.clone(),
+						child_changes: child_changes.clone(),
+						filter: filter.clone(),
+						child_filters: child_filters.clone(),
+					},
+				));
+			}
 		}
 	}
 
@@ -438,9 +409,13 @@ impl<Hash> StorageNotificationsImpl<Hash> {
 
 	fn listen(
 		&mut self,
+		arc: Arc<ProtectedStorageNotificationsImpl<Hash>>,
 		filter_keys: Option<&[StorageKey]>,
 		filter_child_keys: Option<&[(StorageKey, Option<Vec<StorageKey>>)]>,
-	) -> (u64, TracingUnboundedReceiver<(Hash, StorageChangeSet)>) {
+	) -> TracingUnboundedReceiver<(Hash, StorageChangeSet)>
+	where
+		Hash: Send + Sync + 'static,
+	{
 		self.next_id += 1;
 		let current_id = self.next_id;
 
@@ -467,14 +442,14 @@ impl<Hash> StorageNotificationsImpl<Hash> {
 		});
 
 		// insert sink
-		let (tx, rx) = tracing_unbounded("mpsc_storage_notification_items");
+		let (tx, rx) = tracing_unbounded("mpsc_storage_notification_items", arc, current_id);
 		self.sinks.insert(current_id, (tx, keys, child_keys));
 
 		if let Some(m) = self.metrics.as_ref() {
 			m.with_label_values(&[&"added"]).inc();
 		}
 
-		(current_id, rx)
+		rx
 	}
 }
 

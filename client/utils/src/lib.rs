@@ -36,6 +36,7 @@
 //! | entity       | Name of channel passed to `tracing_unbounded` |
 //! | action       | One of `send`/`received`/`dropped`            |
 
+pub mod channel;
 pub mod metrics;
 pub mod mpsc;
 pub mod notification;
