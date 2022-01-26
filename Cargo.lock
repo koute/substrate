@@ -1039,7 +1039,7 @@ dependencies = [
 [[package]]
 name = "cranelift-bforest"
 version = "0.80.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 dependencies = [
  "cranelift-entity 0.80.0",
 ]
@@ -1066,7 +1066,7 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen"
 version = "0.80.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 dependencies = [
  "cranelift-bforest 0.80.0",
  "cranelift-codegen-meta 0.80.0",
@@ -1092,7 +1092,7 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-meta"
 version = "0.80.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 dependencies = [
  "cranelift-codegen-shared 0.80.0",
 ]
@@ -1106,7 +1106,7 @@ checksum = "6759012d6d19c4caec95793f052613e9d4113e925e7f14154defbac0f1d4c938"
 [[package]]
 name = "cranelift-codegen-shared"
 version = "0.80.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 
 [[package]]
 name = "cranelift-entity"
@@ -1120,7 +1120,7 @@ dependencies = [
 [[package]]
 name = "cranelift-entity"
 version = "0.80.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 dependencies = [
  "serde",
 ]
@@ -1140,7 +1140,7 @@ dependencies = [
 [[package]]
 name = "cranelift-frontend"
 version = "0.80.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 dependencies = [
  "cranelift-codegen 0.80.0",
  "log 0.4.14",
@@ -1151,7 +1151,7 @@ dependencies = [
 [[package]]
 name = "cranelift-native"
 version = "0.80.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 dependencies = [
  "cranelift-codegen 0.80.0",
  "libc",
@@ -1161,7 +1161,7 @@ dependencies = [
 [[package]]
 name = "cranelift-wasm"
 version = "0.80.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 dependencies = [
  "cranelift-codegen 0.80.0",
  "cranelift-entity 0.80.0",
@@ -11520,7 +11520,7 @@ checksum = "98930446519f63d00a836efdc22f67766ceae8dbcc1571379f2bcabc6b2b9abc"
 [[package]]
 name = "wasmtime"
 version = "0.33.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 dependencies = [
  "anyhow",
  "backtrace",
@@ -11549,7 +11549,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-cache"
 version = "0.33.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 dependencies = [
  "anyhow",
  "base64 0.13.0",
@@ -11568,7 +11568,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-cranelift"
 version = "0.33.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 dependencies = [
  "anyhow",
  "cranelift-codegen 0.80.0",
@@ -11589,7 +11589,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-environ"
 version = "0.33.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 dependencies = [
  "anyhow",
  "cranelift-entity 0.80.0",
@@ -11608,7 +11608,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-jit"
 version = "0.33.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 dependencies = [
  "addr2line",
  "anyhow",
@@ -11632,7 +11632,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-runtime"
 version = "0.33.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 dependencies = [
  "anyhow",
  "backtrace",
@@ -11658,7 +11658,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-types"
 version = "0.33.0"
-source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#ec95b9365e3d52b3f5a4c2c8af42ba9961dff833"
+source = "git+https://github.com/koute/wasmtime.git?branch=main_cow_instance_reuse_with_cfallin_memfd_cow#839fc5b1ab3aec270a3abbc29724f286c806ef62"
 dependencies = [
  "cranelift-entity 0.80.0",
  "serde",
