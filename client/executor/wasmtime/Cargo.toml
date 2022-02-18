@@ -23,14 +23,25 @@ sp-wasm-interface = { version = "5.0.0", path = "../../../primitives/wasm-interf
 sp-runtime-interface = { version = "5.0.0", path = "../../../primitives/runtime-interface" }
 sp-core = { version = "5.0.0", path = "../../../primitives/core" }
 sc-allocator = { version = "4.1.0-dev", path = "../../allocator" }
-wasmtime = { version = "0.33.0", default-features = false, features = [
+
+[dependencies.wasmtime]
+version = "0.34.0"
+default-features = false
+features = [
     "cache",
     "cranelift",
     "jitdump",
     "parallel-compilation",
-] }
+    "pooling-allocator",
+    "memfd",
+]
+path = "/scratch/cpp/wasmtime/crates/wasmtime"
+
 
 [dev-dependencies]
 sc-runtime-test = { version = "2.0.0", path = "../runtime-test" }
 sp-io = { version = "5.0.0", path = "../../../primitives/io" }
 wat = "1.0"
+
+[features]
+uffd = ["wasmtime/uffd"]
