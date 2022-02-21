@@ -22,7 +22,7 @@ use codec::Encode;
 use sc_executor_common::{runtime_blob::RuntimeBlob, wasm_runtime::WasmModule};
 use sc_executor_common::wasm_runtime::WasmInstance;
 use sc_executor_wasmtime::InstantiationStrategy;
-use sc_runtime_test::wasm_binary_unwrap;
+use sc_runtime_test::wasm_binary_unwrap as test_runtime;
 use sp_wasm_interface::HostFunctions as _;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -32,7 +32,11 @@ use std::sync::atomic::Ordering;
 #[derive(Clone)]
 enum Method {
 	Interpreted,
-	Compiled { instantiation_strategy: InstantiationStrategy },
+	Compiled {
+	    instantiation_strategy: InstantiationStrategy,
+	    enable_pooling: bool,
+	    enable_memfd: bool
+	},
 }
 
 // This is just a bog-standard Kusama runtime with an extra
@@ -57,7 +61,9 @@ fn initialize(runtime: &[u8], method: Method) -> Arc<dyn WasmModule> {
 		)
 		.map(|runtime| -> Arc<dyn WasmModule> { Arc::new(runtime) }),
 		#[cfg(feature = "wasmtime")]
-		Method::Compiled { instantiation_strategy } =>
+		Method::Compiled { instantiation_strategy, enable_pooling, enable_memfd } => {
+		    std::env::set_var("FORCE_WASMTIME_MEMFD", if enable_memfd { "1" } else { "0" });
+		    std::env::set_var("FORCE_WASMTIME_INSTANCE_POOLING", if enable_pooling { "1" } else { "0" });
 			sc_executor_wasmtime::create_runtime::<sp_io::SubstrateHostFunctions>(
 				blob,
 				sc_executor_wasmtime::Config {
@@ -73,7 +79,8 @@ fn initialize(runtime: &[u8], method: Method) -> Arc<dyn WasmModule> {
 					},
 				},
 			)
-			.map(|runtime| -> Arc<dyn WasmModule> { Arc::new(runtime) }),
+			.map(|runtime| -> Arc<dyn WasmModule> { Arc::new(runtime) })
+        }
 	}
 	.unwrap()
 }
@@ -83,16 +90,22 @@ fn bench_call_instance(c: &mut Criterion) {
 
     let strategies = [
         #[cfg(feature = "wasmtime")]
-        ("legacy_instance_reuse", Method::Compiled { instantiation_strategy: InstantiationStrategy::LegacyInstanceReuse }),
+        ("legacy_instance_reuse", Method::Compiled { instantiation_strategy: InstantiationStrategy::LegacyInstanceReuse, enable_pooling: false, enable_memfd: false }),
         #[cfg(feature = "wasmtime")]
-        ("native_instance_reuse", Method::Compiled { instantiation_strategy: InstantiationStrategy::NativeInstanceReuse }),
+        ("native_instance_reuse", Method::Compiled { instantiation_strategy: InstantiationStrategy::NativeInstanceReuse, enable_pooling: false, enable_memfd: false }),
         #[cfg(feature = "wasmtime")]
-        ("recreate_instance", Method::Compiled { instantiation_strategy: InstantiationStrategy::RecreateInstance }),
+        ("recreate_instance_vanilla", Method::Compiled { instantiation_strategy: InstantiationStrategy::RecreateInstance, enable_pooling: false, enable_memfd: false }),
+        #[cfg(feature = "wasmtime")]
+        ("recreate_instance_pooling_only", Method::Compiled { instantiation_strategy: InstantiationStrategy::RecreateInstance, enable_pooling: true, enable_memfd: false }),
+        #[cfg(feature = "wasmtime")]
+        ("recreate_instance_memfd_only", Method::Compiled { instantiation_strategy: InstantiationStrategy::RecreateInstance, enable_pooling: false, enable_memfd: true }),
+        #[cfg(feature = "wasmtime")]
+        ("recreate_instance_pooling_memfd", Method::Compiled { instantiation_strategy: InstantiationStrategy::RecreateInstance, enable_pooling: true, enable_memfd: true }),
         ("interpreted", Method::Interpreted),
     ];
 
     let runtimes = [
-        ("test_runtime", test_runtime()),
+//        ("test_runtime", test_runtime()),
         ("kusama_runtime", kusama_runtime())
     ];
 

@@ -371,6 +371,16 @@ fn common_config(semantics: &Semantics) -> std::result::Result<wasmtime::Config,
 	config.wasm_threads(false);
 	config.wasm_memory64(false);
 
+    if std::env::var_os("FORCE_WASMTIME_MEMFD")
+        .map(|value| value == "1")
+        .unwrap_or(false)
+    {
+        log::info!("Will use wasmtime memfd instance creation!");
+        config.memfd(true);
+    } else {
+        config.memfd(false);
+    }
+
 	Ok(config)
 }
 
