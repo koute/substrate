@@ -163,6 +163,20 @@ fn extern_func(extern_: &Extern) -> Option<&Func> {
 	}
 }
 
+lazy_static::lazy_static! {
+	static ref FUEL: u64 = {
+		if let Ok(interval) = std::env::var("HACK_FUEL") {
+			interval.parse().expect("HACK_FUEL is invalid")
+		} else {
+			114_057_726
+		}
+	};
+
+	static ref CONSUME_FUEL: bool = {
+		std::env::var_os("HACK_CONSUME_FUEL").map(|value| value == "1").unwrap_or(false)
+	};
+}
+
 pub(crate) fn create_store(engine: &wasmtime::Engine, max_memory_size: Option<usize>) -> Store {
 	let limits = if let Some(max_memory_size) = max_memory_size {
 		wasmtime::StoreLimitsBuilder::new().memory_size(max_memory_size).build()
@@ -175,8 +189,8 @@ pub(crate) fn create_store(engine: &wasmtime::Engine, max_memory_size: Option<us
 	if max_memory_size.is_some() {
 		store.limiter(|s| &mut s.limits);
 	}
-	if std::env::var_os("HACK_CONSUME_FUEL").map(|value| value == "1").unwrap_or(false) {
-		store.add_fuel(114_057_726).expect("failed to add fuel");
+	if *CONSUME_FUEL {
+		store.add_fuel(*FUEL).expect("failed to add fuel");
 	}
 	store
 }
