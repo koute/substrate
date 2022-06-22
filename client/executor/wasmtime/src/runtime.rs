@@ -752,8 +752,12 @@ unsafe extern "C" fn sig_handler(
 	let _ = Engine::async_fuel_check(siginfo, context);
 }
 
-fn init_async_fuel_check() -> FuelCheckLifetime {
+fn init_async_fuel_check() -> Option<FuelCheckLifetime> {
 	use parking_lot::Once;
+
+	if !*crate::instance_wrapper::CONSUME_FUEL {
+		return None
+	}
 
 	static RUNNING: AtomicBool = AtomicBool::new(false);
 	static START: Once = Once::new();
@@ -802,7 +806,7 @@ fn init_async_fuel_check() -> FuelCheckLifetime {
 		std::thread::yield_now();
 	}
 
-	FuelCheckLifetime(tid)
+	Some(FuelCheckLifetime(tid))
 }
 
 fn perform_call(
