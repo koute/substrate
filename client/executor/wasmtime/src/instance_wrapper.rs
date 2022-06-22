@@ -175,6 +175,9 @@ pub(crate) fn create_store(engine: &wasmtime::Engine, max_memory_size: Option<us
 	if max_memory_size.is_some() {
 		store.limiter(|s| &mut s.limits);
 	}
+	if std::env::var_os("HACK_CONSUME_FUEL").map(|value| value == "1").unwrap_or(false) {
+		store.add_fuel(114_057_726).expect("failed to add fuel");
+	}
 	store
 }
 

@@ -338,6 +338,11 @@ fn common_config(semantics: &Semantics) -> std::result::Result<wasmtime::Config,
 		semantics.max_memory_size.map(|max| max as u64).unwrap_or(u64::MAX),
 	);
 
+	if std::env::var_os("HACK_CONSUME_FUEL").map(|value| value == "1").unwrap_or(false) {
+		log::info!("Turning fuel consumption on in wasmtime");
+		config.consume_fuel(true);
+	}
+
 	if use_pooling {
 		const WASM_PAGE_SIZE: u64 = 65536;
 		const MAX_WASM_PAGES: u64 = 0x10000;
