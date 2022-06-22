@@ -35,7 +35,8 @@ pub enum EntryPointType {
 	/// Direct call.
 	///
 	/// Call is made by providing only payload reference and length.
-	Direct { entrypoint: wasmtime::TypedFunc<(u32, u32), u64> },
+	// Direct { entrypoint: wasmtime::TypedFunc<(u32, u32), u64> },
+	Direct { entrypoint: wasmtime::Func },
 	/// Indirect call.
 	///
 	/// Call is made by providing payload reference and length, and extra argument
@@ -43,7 +44,8 @@ pub enum EntryPointType {
 	Wrapped {
 		/// The extra argument passed to the runtime. It is typically a wasm function pointer.
 		func: u32,
-		dispatcher: wasmtime::TypedFunc<(u32, u32, u32), u64>,
+		// dispatcher: wasmtime::TypedFunc<(u32, u32, u32), u64>,
+		dispatcher: wasmtime::Func,
 	},
 }
 
@@ -63,11 +65,18 @@ impl EntryPoint {
 		let data_ptr = u32::from(data_ptr);
 		let data_len = u32::from(data_len);
 
+		let mut result = [Val::I64(0)];
 		match self.call_type {
-			EntryPointType::Direct { ref entrypoint } =>
-				entrypoint.call(&mut *store, (data_ptr, data_len)),
-			EntryPointType::Wrapped { func, ref dispatcher } =>
-				dispatcher.call(&mut *store, (func, data_ptr, data_len)),
+			EntryPointType::Direct { ref entrypoint } => entrypoint.call(
+				&mut *store,
+				&[Val::I32(data_ptr as i32), Val::I32(data_len as i32)],
+				&mut result,
+			),
+			EntryPointType::Wrapped { func, ref dispatcher } => dispatcher.call(
+				&mut *store,
+				&[Val::I32(func as i32), Val::I32(data_ptr as i32), Val::I32(data_len as i32)],
+				&mut result,
+			),
 		}
 		.map_err(|trap| {
 			let host_state = store
@@ -94,22 +103,23 @@ impl EntryPoint {
 				})
 			} else {
 				Error::AbortedDueToTrap(MessageWithBacktrace {
-					message: trap.display_reason().to_string(),
+					message: trap.to_string(), // trap.display_reason().to_string(),
 					backtrace: Some(backtrace),
 				})
 			}
-		})
+		})?;
+
+		match result[0] {
+			Val::I64(value) => Ok(value as u64),
+			_ => panic!("bad return type"),
+		}
 	}
 
 	pub fn direct(
 		func: wasmtime::Func,
 		ctx: impl AsContext,
 	) -> std::result::Result<Self, &'static str> {
-		let entrypoint = func
-			.typed::<(u32, u32), u64, _>(ctx)
-			.map_err(|_| "Invalid signature for direct entry point")?
-			.clone();
-		Ok(Self { call_type: EntryPointType::Direct { entrypoint } })
+		Ok(Self { call_type: EntryPointType::Direct { entrypoint: func } })
 	}
 
 	pub fn wrapped(
@@ -117,10 +127,6 @@ impl EntryPoint {
 		func: u32,
 		ctx: impl AsContext,
 	) -> std::result::Result<Self, &'static str> {
-		let dispatcher = dispatcher
-			.typed::<(u32, u32, u32), u64, _>(ctx)
-			.map_err(|_| "Invalid signature for wrapped entry point")?
-			.clone();
 		Ok(Self { call_type: EntryPointType::Wrapped { func, dispatcher } })
 	}
 }
