@@ -58,7 +58,72 @@ where
 	}
 
 	let mut registry = Registry { linker, pending_func_imports };
-	H::register_static(&mut registry)?;
+	// H::register_static(&mut registry)?;
+	for function in H::host_functions() {
+		let (_import_ty, func_ty) = match registry.pending_func_imports.remove(function.name()) {
+			Some(import) => import,
+			None => continue,
+		};
+
+		registry
+			.linker
+			.func_new("env", function.name(), func_ty, move |caller, input, output| {
+				use sp_wasm_interface::Value;
+				use wasmtime::Val;
+
+				let ctx = &mut HostContext { caller };
+				let mut args = input.iter().map(|arg| match arg {
+					Val::I32(value) => Value::I32(*value),
+					Val::I64(value) => Value::I64(*value),
+					Val::F32(value) => Value::F32(*value),
+					Val::F64(value) => Value::F64(*value),
+					Val::V128(_) | Val::FuncRef(_) | Val::ExternRef(_) => unimplemented!(),
+				});
+				let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+					function.execute(ctx, &mut args).map_err(wasmtime::Trap::new)
+				}));
+
+				let result = match result {
+					Ok(result) => result?,
+					Err(panic) => {
+						let message = if let Some(message) = panic.downcast_ref::<String>() {
+							format!(
+								"host code panicked while being called by the runtime: {}",
+								message
+							)
+						} else if let Some(message) = panic.downcast_ref::<&'static str>() {
+							format!(
+								"host code panicked while being called by the runtime: {}",
+								message
+							)
+						} else {
+							"host code panicked while being called by the runtime".to_owned()
+						};
+						return Err(wasmtime::Trap::new(message))
+					},
+				};
+
+				assert!(output.len() <= 1);
+				if output.len() == 1 {
+					match result {
+						None => {},
+						Some(Value::I32(value)) => output[0] = Val::I32(value),
+						Some(Value::I64(value)) => output[0] = Val::I64(value),
+						Some(Value::F32(value)) => output[0] = Val::F32(value),
+						Some(Value::F64(value)) => output[0] = Val::F64(value),
+					}
+				}
+
+				Ok(())
+			})
+			.map_err(|error| {
+				WasmError::Other(format!(
+					"failed to register host function '{}' with the WASM linker: {}",
+					function.name(),
+					error
+				))
+			})?;
+	}
 
 	if !registry.pending_func_imports.is_empty() {
 		if allow_missing_func_imports {
