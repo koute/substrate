@@ -755,7 +755,7 @@ unsafe extern "C" fn sig_handler(
 fn init_async_fuel_check() -> Option<FuelCheckLifetime> {
 	use parking_lot::Once;
 
-	if !*crate::instance_wrapper::CONSUME_FUEL {
+	if !*crate::instance_wrapper::START_FUEL_CHECK_THREAD {
 		return None
 	}
 

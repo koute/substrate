@@ -175,6 +175,10 @@ lazy_static::lazy_static! {
 	pub static ref CONSUME_FUEL: bool = {
 		std::env::var_os("HACK_CONSUME_FUEL").map(|value| value == "1").unwrap_or(false)
 	};
+
+	pub static ref START_FUEL_CHECK_THREAD: bool = {
+		*CONSUME_FUEL || std::env::var_os("HACK_FORCE_START_FUEL_CHECK_THREAD").map(|value| value == "1").unwrap_or(false)
+	};
 }
 
 pub(crate) fn create_store(engine: &wasmtime::Engine, max_memory_size: Option<usize>) -> Store {
