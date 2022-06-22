@@ -338,7 +338,7 @@ fn common_config(semantics: &Semantics) -> std::result::Result<wasmtime::Config,
 		semantics.max_memory_size.map(|max| max as u64).unwrap_or(u64::MAX),
 	);
 
-	if std::env::var_os("HACK_CONSUME_FUEL").map(|value| value == "1").unwrap_or(false) {
+	if *crate::instance_wrapper::CONSUME_FUEL {
 		log::info!("Turning fuel consumption on in wasmtime");
 		config.consume_fuel(true);
 	}

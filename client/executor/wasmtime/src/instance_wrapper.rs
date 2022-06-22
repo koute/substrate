@@ -172,7 +172,7 @@ lazy_static::lazy_static! {
 		}
 	};
 
-	static ref CONSUME_FUEL: bool = {
+	pub static ref CONSUME_FUEL: bool = {
 		std::env::var_os("HACK_CONSUME_FUEL").map(|value| value == "1").unwrap_or(false)
 	};
 }
