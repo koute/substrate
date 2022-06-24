@@ -113,6 +113,16 @@ sp_core::wasm_export_functions! {
 	   }
    }
 
+	fn test_burn_cpu_cycles(divisor: u64, limit: u64) -> u64 {
+		let mut sum: u64 = 0;
+		for n in 0..limit {
+			if n % divisor == 0 {
+				sum = sum.wrapping_add(n);
+			}
+		}
+		sum
+	}
+
 	fn test_allocate_vec(size: u32) -> Vec<u8> {
 		Vec::with_capacity(size as usize)
 	}

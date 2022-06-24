@@ -234,9 +234,14 @@ fn bench_call_instance(c: &mut Criterion) {
 		instance.call_export("test_dirty_plenty_memory", &(0, 16).encode()).unwrap();
 	}
 
+	fn test_burn_cpu_cycles(instance: &mut Box<dyn WasmInstance>) {
+		instance.call_export("test_burn_cpu_cycles", &(4_u64, 2000000_u64).encode()).unwrap();
+	}
+
 	let testcases = [
 		("call_empty_function", test_call_empty_function as fn(&mut Box<dyn WasmInstance>)),
 		("dirty_1mb_of_memory", test_dirty_1mb_of_memory),
+		("burn_cpu_cycles", test_burn_cpu_cycles),
 	];
 
 	let num_cpus = num_cpus::get_physical();
@@ -247,6 +252,10 @@ fn bench_call_instance(c: &mut Criterion) {
 			let runtime = initialize(&mut tmpdir, runtime, strategy.clone());
 
 			for (testcase_name, testcase) in testcases {
+				if testcase_name == "burn_cpu_cycles" && runtime_name != "test_runtime" {
+					continue
+				}
+
 				for thread_count in thread_counts {
 					if thread_count > num_cpus {
 						// If there are not enough cores available the benchmark is pointless.
