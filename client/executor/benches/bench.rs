@@ -235,7 +235,8 @@ fn bench_call_instance(c: &mut Criterion) {
 	}
 
 	fn test_burn_cpu_cycles(instance: &mut Box<dyn WasmInstance>) {
-		instance.call_export("test_burn_cpu_cycles", &(4_u64, 2000000_u64).encode()).unwrap();
+//		instance.call_export("test_burn_cpu_cycles", &(4_u64, 2000000_u64).encode()).unwrap();
+		instance.call_export("test_return_value", &[0]).unwrap();
 	}
 
 	let testcases = [

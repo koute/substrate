@@ -123,6 +123,10 @@ sp_core::wasm_export_functions! {
 		sum
 	}
 
+    fn test_return_value() -> u64 {
+        return 1234;
+    }
+
 	fn test_allocate_vec(size: u32) -> Vec<u8> {
 		Vec::with_capacity(size as usize)
 	}
