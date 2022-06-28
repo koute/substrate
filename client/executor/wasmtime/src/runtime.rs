@@ -767,10 +767,10 @@ fn init_async_fuel_check() -> Option<FuelCheckLifetime> {
 		let interval = if let Ok(interval) = std::env::var("HACK_SIGNAL_INTERVAL") {
 			interval.parse().expect("HACK_SIGNAL_INTERVAL is invalid")
 		} else {
-			1000
+			1000000
 		};
 
-		log::info!("Will send signal to the WASM thread every {}ms", interval);
+		log::info!("Will send signal to the WASM thread every {}us", interval);
 
 		unsafe {
 			let mut handler: libc::sigaction = std::mem::zeroed();
@@ -787,7 +787,7 @@ fn init_async_fuel_check() -> Option<FuelCheckLifetime> {
 			RUNNING.store(true, Ordering::SeqCst);
 
 			loop {
-				std::thread::sleep(std::time::Duration::from_millis(interval));
+				std::thread::sleep(std::time::Duration::from_micros(interval));
 				buffer.clear();
 				buffer.extend(THREADS.lock().iter().copied());
 				for &tid in &buffer {
