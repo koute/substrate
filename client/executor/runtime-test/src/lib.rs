@@ -123,9 +123,54 @@ sp_core::wasm_export_functions! {
 		sum
 	}
 
-    fn test_return_value() -> u64 {
-        return 1234;
-    }
+	fn test_return_value() -> u64 {
+		return 1234;
+	}
+
+	fn test_wasmi_regex_redux() {
+		// Source:
+		//   https://github.com/Robbepop/wasm_kernel/tree/6abd5b38d9775b3957087fd9b1e8cae9418602a0/target/wasm32-unknown-unknown/release
+		//   https://github.com/paritytech/wasmi/blob/29110ed2469702b23ea6263e1a936eb2af6701c6/benches/benches.rs#L283=
+		let blob = include_bytes!("wasm_kernel.wasm");
+		let revcomp_input = include_bytes!("revcomp-input.txt");
+		let module = wasmi::Module::from_buffer(blob).unwrap();
+		let instance = wasmi::ModuleInstance::new(&module, &wasmi::ImportsBuilder::default())
+			.unwrap()
+			.run_start(&mut wasmi::NopExternals)
+			.unwrap();
+
+		let test_data_ptr: wasmi::RuntimeValue = {
+			let input_size = wasmi::RuntimeValue::I32(revcomp_input.len() as i32);
+			let result = instance.invoke_export("prepare_regex_redux", &[input_size], &mut wasmi::NopExternals);
+			match result {
+				Ok(Some(v @ wasmi::RuntimeValue::I32(_))) => v,
+				_ => panic!()
+			}
+		};
+
+		// Get the pointer to the input buffer.
+		let input_data_mem_offset = match instance.invoke_export("regex_redux_input_ptr", &[test_data_ptr], &mut wasmi::NopExternals) {
+			Ok(Some(wasmi::RuntimeValue::I32(v))) => v as u32,
+			_ => panic!(),
+		};
+
+		// Copy test data inside the wasm memory.
+		let memory = instance
+			.export_by_name("memory")
+			.expect("Expected export with a name 'memory'")
+			.as_memory()
+			.expect("'memory' should be a memory instance")
+			.clone();
+		memory
+			.set(input_data_mem_offset, revcomp_input)
+			.expect("can't load test data into a wasm memory");
+
+		for _ in 0..100 {
+			instance
+					.invoke_export("bench_regex_redux", &[test_data_ptr], &mut wasmi::NopExternals)
+					.unwrap();
+		}
+	}
 
 	fn test_allocate_vec(size: u32) -> Vec<u8> {
 		Vec::with_capacity(size as usize)

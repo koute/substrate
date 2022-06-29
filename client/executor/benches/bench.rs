@@ -239,7 +239,13 @@ fn bench_call_instance(c: &mut Criterion) {
 	}
 
 	fn test_burn_cpu_cycles(instance: &mut Box<dyn WasmInstance>) {
-		instance.call_export("test_burn_cpu_cycles", &(4_u64, 2000000_u64).encode()).unwrap();
+		instance
+			.call_export("test_burn_cpu_cycles", &(4_u64, 2000000_u64).encode())
+			.unwrap();
+	}
+
+	fn test_wasmi_regex_redux(instance: &mut Box<dyn WasmInstance>) {
+		instance.call_export("test_wasmi_regex_redux", &[0].encode()).unwrap();
 	}
 
 	let testcases = [
@@ -247,6 +253,7 @@ fn bench_call_instance(c: &mut Criterion) {
 		("dirty_1mb_of_memory", test_dirty_1mb_of_memory),
 		("return_value", test_return_value),
 		("burn_cpu_cycles", test_burn_cpu_cycles),
+		("wasmi_regex_redux", test_wasmi_regex_redux),
 	];
 
 	let num_cpus = num_cpus::get_physical();

@@ -117,6 +117,7 @@ sc-consensus-babe = { version = "0.10.0-dev", path = "../../../client/consensus/
 sc-consensus-epochs = { version = "0.10.0-dev", path = "../../../client/consensus/epochs" }
 sc-service-test = { version = "2.0.0", path = "../../../client/service/test" }
 sc-block-builder = { version = "0.10.0-dev", path = "../../../client/block-builder" }
+sc-executor-wasmtime = { path = "../../../client/executor/wasmtime" }
 sp-tracing = { version = "5.0.0", path = "../../../primitives/tracing" }
 sp-blockchain = { version = "4.0.0-dev", path = "../../../primitives/blockchain" }
 futures = "0.3.21"
@@ -163,6 +164,8 @@ runtime-benchmarks = ["node-runtime/runtime-benchmarks", "frame-benchmarking-cli
 # Enable features that allow the runtime to be tried and debugged. Name might be subject to change
 # in the near future.
 try-runtime = ["node-runtime/try-runtime", "try-runtime-cli"]
+fuel-check-vanilla = ["sc-executor-wasmtime/fuel-check-vanilla"]
+fuel-check-async = ["sc-executor-wasmtime/fuel-check-async"]
 
 [[bench]]
 name = "transaction_pool"

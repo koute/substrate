@@ -733,80 +733,110 @@ pub fn prepare_runtime_artifact(
 		.map_err(|e| WasmError::Other(format!("cannot precompile module: {}", e)))
 }
 
-struct FuelCheckLifetime(libc::pthread_t);
-impl Drop for FuelCheckLifetime {
-	fn drop(&mut self) {
-		let mut threads = THREADS.lock();
-		let index = threads.iter().position(|tid| *tid == self.0).unwrap();
-		threads.swap_remove(index);
-	}
+#[cfg(not(any(feature = "fuel-check-vanilla", feature = "fuel-check-async")))]
+compile_error!("Add '--features sc-executor-wasmtime/fuel-check-vanilla' or '--features sc-executor-wasmtime/fuel-check-async' to your cargo invocation!");
+
+#[cfg(feature = "fuel-check-vanilla")]
+mod fuel_check {
+	pub fn init_async_fuel_check() {}
 }
 
-static THREADS: parking_lot::Mutex<Vec<libc::pthread_t>> = parking_lot::const_mutex(Vec::new());
+#[cfg(feature = "fuel-check-async")]
+mod fuel_check {
+	use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+	use wasmtime::Engine;
 
-unsafe extern "C" fn sig_handler(
-	_signum: libc::c_int,
-	siginfo: *mut libc::siginfo_t,
-	context: *mut libc::c_void,
-) {
-	let _ = Engine::async_fuel_check(siginfo, context);
-}
-
-fn init_async_fuel_check() -> Option<FuelCheckLifetime> {
-	use parking_lot::Once;
-
-	if !*crate::instance_wrapper::START_FUEL_CHECK_THREAD {
-		return None
+	pub struct FuelCheckLifetime(libc::pthread_t);
+	impl Drop for FuelCheckLifetime {
+		fn drop(&mut self) {
+			let mut threads = THREADS.lock();
+			let index = threads.iter().position(|tid| *tid == self.0).unwrap();
+			threads.swap_remove(index);
+			THREADS_EPOCH.fetch_add(1, Ordering::Relaxed);
+			std::mem::drop(threads);
+		}
 	}
 
-	static RUNNING: AtomicBool = AtomicBool::new(false);
-	static START: Once = Once::new();
+	static THREADS: parking_lot::Mutex<Vec<libc::pthread_t>> = parking_lot::const_mutex(Vec::new());
+	static THREADS_EPOCH: AtomicU64 = AtomicU64::new(0);
 
-	START.call_once(|| {
-		THREADS.lock().reserve(16);
-		let interval = if let Ok(interval) = std::env::var("HACK_SIGNAL_INTERVAL") {
-			interval.parse().expect("HACK_SIGNAL_INTERVAL is invalid")
-		} else {
-			1000000
-		};
+	unsafe extern "C" fn sig_handler(
+		_signum: libc::c_int,
+		siginfo: *mut libc::siginfo_t,
+		context: *mut libc::c_void,
+	) {
+		let _ = Engine::async_fuel_check(siginfo, context);
+	}
 
-		log::info!("Will send signal to the WASM thread every {}us", interval);
+	pub fn init_async_fuel_check() -> Option<FuelCheckLifetime> {
+		use parking_lot::Once;
 
-		unsafe {
-			let mut handler: libc::sigaction = std::mem::zeroed();
-			handler.sa_flags = libc::SA_SIGINFO;
-			handler.sa_sigaction = sig_handler as usize;
-			libc::sigemptyset(&mut handler.sa_mask);
-			if libc::sigaction(libc::SIGUSR1, &handler, std::ptr::null_mut()) != 0 {
-				panic!("unable to install signal handler: {}", std::io::Error::last_os_error(),);
-			}
+		if !*crate::instance_wrapper::START_FUEL_CHECK_THREAD {
+			return None
 		}
 
-		std::thread::spawn(move || {
-			let mut buffer = Vec::with_capacity(16);
-			RUNNING.store(true, Ordering::SeqCst);
+		static RUNNING: AtomicBool = AtomicBool::new(false);
+		static START: Once = Once::new();
 
-			loop {
-				std::thread::sleep(std::time::Duration::from_micros(interval));
-				buffer.clear();
-				buffer.extend(THREADS.lock().iter().copied());
-				for &tid in &buffer {
-					unsafe {
-						libc::pthread_kill(tid, libc::SIGUSR1);
-					}
+		START.call_once(|| {
+			THREADS.lock().reserve(16);
+			let interval = if let Ok(interval) = std::env::var("HACK_SIGNAL_INTERVAL") {
+				interval.parse().expect("HACK_SIGNAL_INTERVAL is invalid")
+			} else {
+				1000000
+			};
+
+			log::info!("Will send signal to the WASM thread every {}us", interval);
+
+			unsafe {
+				let mut handler: libc::sigaction = std::mem::zeroed();
+				handler.sa_flags = libc::SA_SIGINFO;
+				handler.sa_sigaction = sig_handler as usize;
+				libc::sigemptyset(&mut handler.sa_mask);
+				if libc::sigaction(libc::SIGUSR1, &handler, std::ptr::null_mut()) != 0 {
+					panic!("unable to install signal handler: {}", std::io::Error::last_os_error(),);
 				}
 			}
+
+			std::thread::spawn(move || {
+				let mut buffer = Vec::with_capacity(16);
+				RUNNING.store(true, Ordering::SeqCst);
+
+				let threads = THREADS.lock();
+				buffer.extend(threads.iter().copied());
+				let mut epoch = THREADS_EPOCH.load(Ordering::Relaxed);
+				std::mem::drop(threads);
+
+				loop {
+					std::thread::sleep(std::time::Duration::from_micros(interval));
+					if THREADS_EPOCH.load(Ordering::Relaxed) != epoch {
+						buffer.clear();
+						let threads = THREADS.lock();
+						buffer.extend(threads.iter().copied());
+						epoch = THREADS_EPOCH.load(Ordering::Relaxed);
+					}
+
+					for &tid in &buffer {
+						unsafe {
+							libc::pthread_kill(tid, libc::SIGUSR1);
+						}
+					}
+				}
+			});
 		});
-	});
 
-	let tid = unsafe { libc::pthread_self() };
-	THREADS.lock().push(tid);
+		let tid = unsafe { libc::pthread_self() };
+		let mut threads = THREADS.lock();
+		threads.push(tid);
+		THREADS_EPOCH.fetch_add(1, Ordering::Relaxed);
+		std::mem::drop(threads);
 
-	while RUNNING.load(Ordering::Relaxed) == false {
-		std::thread::yield_now();
+		while RUNNING.load(Ordering::Relaxed) == false {
+			std::thread::yield_now();
+		}
+
+		Some(FuelCheckLifetime(tid))
 	}
-
-	Some(FuelCheckLifetime(tid))
 }
 
 fn perform_call(
@@ -822,7 +852,7 @@ fn perform_call(
 	// Set the host state before calling into wasm.
 	instance_wrapper.store_mut().data_mut().host_state = Some(host_state);
 
-	let guard = init_async_fuel_check();
+	let guard = fuel_check::init_async_fuel_check();
 
 	let ret = entrypoint
 		.call(instance_wrapper.store_mut(), data_ptr, data_len)
